@@ -3,7 +3,7 @@
 /***************************************
  * www.program-o.com
  * PROGRAM O
- * Version: 2.6.8
+ * Version: 2.6.*
  * FILE: chatbot/core/conversation/intialise_conversation.php
  * AUTHOR: Elizabeth Perreau and Dave Morton
  * DATE: MAY 17TH 2014
@@ -395,6 +395,7 @@ function log_conversation($convoArr)
 {
     //db globals
     global $dbn;
+    //save_file(_LOG_PATH_ . 'conversation.data.txt', print_r($convoArr['conversation'], true));
     runDebug(__FILE__, __FUNCTION__, __LINE__, 'Saving the conversation to the DB.', 2);
     //clean and set
     $usersay = $convoArr['aiml']['user_raw'];
@@ -438,6 +439,39 @@ function log_conversation($convoArr)
 
     $numRows = db_write($sql, $params, false, __FILE__, __FUNCTION__, __LINE__);
 
+    // check to see if there is already a setting in the table
+
+    $insertSQL = <<<endSQL
+insert into `client_properties`
+    (`id`, `user_id`, `bot_id`, `name`, `value`)
+    values(null, :user_id, :bot_id, :name, :value);
+endSQL;
+    $updateSQL = 'update `client_properties` set value = :value where `bot_id` = :bot_id and `user_id` = :user_id and `name` = :name;';
+    $client_properties = $convoArr['client_properties'];
+    $insertParams = [];
+    $updateParams = [];
+    foreach ($client_properties as $name => $value)
+    {
+        $params = array(
+            ':bot_id' => $bot_id,
+            ':user_id' => $user_id,
+            ':name' => $name,
+            ':value' => $value,
+        );
+        $lookSQL = 'select id from client_properties where `bot_id` = :bot_id and `user_id` = :user_id and `name` = :name;';
+        $lookParams = $params;
+        unset($lookParams[':value']);
+        $result = "foo!";
+        $result = db_fetch($lookSQL, $lookParams, __FILE__, __FUNCTION__, __LINE__);
+        $debug_SQL = db_parseSQL($lookSQL, $lookParams);
+        if (!empty($result))
+        {
+            $updateParams[] = $params;
+        }
+        else $insertParams[] = $params;
+    }
+    $insertSuccess = (!empty($insertParams)) ? db_write($insertSQL, $insertParams, true, __FILE__, __FUNCTION__, __LINE__) : true;
+    $updateSuccess = (!empty($updateParams)) ? db_write($updateSQL, $updateParams, true, __FILE__, __FUNCTION__, __LINE__) : true;
     return $convoArr;
 }
 
@@ -472,6 +506,27 @@ function log_conversation_state($convoArr)
     runDebug(__FILE__, __FUNCTION__, __LINE__, "updating conversation state SQL: $sql", 3);
 
     $numRows = db_write($sql, $params, false, __FILE__, __FUNCTION__, __LINE__);
+
+    // Save client_properties to DB
+    $bot_id = $convoArr['conversation']['bot_id'];
+    $cpSQL = <<<endSQL
+insert into `client_properties`
+    (`id`, `user_id`, `bot_id`, `name`, `value`)
+    values(null, :user_id, :bot_id, :name, :value)
+    on duplicate key update value=:value;
+endSQL;
+    $client_properties = $convoArr['client_properties'];
+    $params = [];
+    foreach ($client_properties as $key => $value)
+    {
+        $params[] = array(
+            ':bot_id' => $bot_id,
+            ':user_id' => $user_id,
+            ':name' => $key,
+            ':value' => $value,
+        );
+    }
+    $success = db_write($cpSQL, $params, true, __FILE__, __FUNCTION__, __LINE__);
 
     return $convoArr;
 }
@@ -609,19 +664,17 @@ function check_set_convo_id($convoArr)
  */
 function check_set_user($convoArr)
 {
-    global $dbn, $unknown_user;
+    global $dbn, $unknown_user, $bot_id;
+    $chatlines = 0;
     runDebug(__FILE__, __FUNCTION__, __LINE__, 'Checking and setting the user info, as needed.', 2);
-    //check to see if user_name has been set if not set as default
+
+    // initial setup
     $convo_id = (isset ($convoArr['conversation']['convo_id'])) ? $convoArr['conversation']['convo_id'] : session_id();
-
-    if (!isset ($convoArr['conversation']['convo_id']))
-    {
-        $convoArr['conversation']['convo_id'] = $convo_id;
-    }
-
     $ip = $_SERVER['REMOTE_ADDR'];
     $convoArr['client_properties']['ip_address'] = $ip;
 
+
+    // get initial user data
     /** @noinspection SqlDialectInspection */
     $sql = "SELECT `user_name`, `id`, `chatlines` FROM `$dbn`.`users` WHERE `session_id` = :convo_id limit 1;";
     $row = db_fetch($sql, array(':convo_id' => $convo_id), __FILE__, __FUNCTION__, __LINE__);
@@ -636,13 +689,27 @@ function check_set_user($convoArr)
     {
         $user_id = $row['id'];
         $user_name = (!empty ($row['user_name'])) ? $row['user_name'] : $unknown_user;
+        $chatlines = (!empty ($row['chatlines'])) ? $row['chatlines'] : 0;
     }
 
-    $chatlines = (!empty ($row['chatlines'])) ? $row['chatlines'] : 0;
-    $user_name = (!empty ($user_name)) ? $user_name : $unknown_user;
+    // get client properties for the user
+    $sql = "SELECT `name`, `value` FROM `$dbn`.`client_properties` WHERE `user_id` = :user_id AND `bot_id` = :bot_id;";
+    $params = array(
+        ':bot_id' => $bot_id,
+        ':user_id' => $user_id,
+    );
+    $debugSQL = db_parseSQL($sql, $params);
+    runDebug(__FILE__, __FUNCTION__, __LINE__, "Loading client properties from the DB - sql:\n$debugSQL", 3);
+    $result = db_fetchAll($sql, $params, __FILE__, __FUNCTION__, __LINE__);
+    foreach ($result as $row)
+    {
+        extract($row);
+        $convoArr['client_properties'][$name] = $value;
+    }
+
+    $convoArr['client_properties']['name'] = $user_name;
     $convoArr['conversation']['user_name'] = $user_name;
     $convoArr['conversation']['user_id'] = $user_id;
-    $convoArr['client_properties']['name'] = $user_name;
     $convoArr['conversation']['totallines'] = $chatlines;
 
     return $convoArr;

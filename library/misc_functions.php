@@ -2,7 +2,7 @@
 /***************************************
  * http://www.program-o.com
  * PROGRAM O
- * Version: 2.6.8
+ * Version: 2.6.*
  * FILE: misc_functions.php
  * AUTHOR: Elizabeth Perreau and Dave Morton
  * DATE: 05-22-2013
@@ -210,7 +210,7 @@ endFooter;
 
 function addUnknownInput($convoArr, $input, $bot_id, $user_id)
 {
-    global $dbConn, $dbn;
+    global $dbn;
 
     $default_aiml_pattern = _strtolower(get_convo_var($convoArr, 'conversation', 'default_aiml_pattern'));
     $lcInput = _strtolower($input);
@@ -239,76 +239,52 @@ function addUnknownInput($convoArr, $input, $bot_id, $user_id)
  * @return string $out
  */
 
-function pretty_print_r($var)
+function pretty_print_r($var, $returnString = false)
 {
     switch (true)
     {
         case (is_array($var)):
-            $out = implode_recursive(",\n", $var, __FILE__, __FUNCTION__, __LINE__);
+            //$out = implode_recursive(",\n", $var, __FILE__, __FUNCTION__, __LINE__);
+            $out = '';
+            foreach ($var as $key => $value)
+            {
+                $message = (is_array($value)) ? print_r($value, true) : $value;
+                $out .= "[{$key}]\n{$message}\n--------------------------------------\n";
+            }
             break;
         default:
             $out = $var;
     }
-    return trim($out, ",\n");
+    switch ($returnString)
+    {
+        case true: return trim($out);
+    }
+    echo trim($out);
+}
+
+function pretty_print_XML($element)
+{
+        $dom = dom_import_simplexml($element);
+        $dom = new DOMDocument("1.0");
+        $dom->preserveWhiteSpace = false;
+        $dom->formatOutput = true;
+        $dom->loadXML($element->asXML());
+        return $dom->saveXML();
 }
 
 function clean_inputs($allowed_vars = null)
 {
-    $options = null; //Temp fix for now. Must assign something other than null to this at some point
-    $out = '';
-
-/* Debugging tool - see what's coming into the form vars, and which filters (if any) are being applied
-    $filterVals = array(
-        FILTER_SANITIZE_STRIPPED      => 'FILTER_SANITIZE_STRIPPED',
-        FILTER_SANITIZE_STRING        => 'FILTER_SANITIZE_STRING',
-        FILTER_SANITIZE_ENCODED       => 'FILTER_SANITIZE_ENCODED',
-        FILTER_SANITIZE_SPECIAL_CHARS => 'FILTER_SANITIZE_SPECIAL_CHARS',
-        FILTER_SANITIZE_EMAIL         => 'FILTER_SANITIZE_EMAIL',
-        FILTER_SANITIZE_URL           => 'FILTER_SANITIZE_URL',
-        FILTER_SANITIZE_NUMBER_INT    => 'FILTER_SANITIZE_NUMBER_INT',
-        FILTER_SANITIZE_NUMBER_FLOAT  => 'FILTER_SANITIZE_NUMBER_FLOAT',
-        FILTER_SANITIZE_MAGIC_QUOTES  => 'FILTER_SANITIZE_MAGIC_QUOTES',
-        FILTER_UNSAFE_RAW             => 'FILTER_UNSAFE_RAW',
-        FILTER_DEFAULT                => 'FILTER_DEFAULT',
-    );
-    if (!defined('ERROR_DEBUGGING')) define('ERROR_DEBUGGING', false); //just in case a fresh install hasn't been performed for some reason
-
-    if (ERROR_DEBUGGING) // This constant may be defined in the config. Must be set to true for this to take effect.
+    $formVars = array();
+    if (!empty($allowed_vars))
     {
-        $ts = str_replace(' ', '_', microtime());
-        save_file(_LOG_PATH_ . "misc_functions.clean_inputs.raw_formVars.{$ts}.txt", print_r($formVars, true));
+        foreach ($allowed_vars as $key => $value){
+            if (!isset($_REQUEST[$key])) continue;
+            $curVar = $_REQUEST[$key];
+            $val = (is_array($curVar))? filter_var_array($curVar, $value) : filter_var(trim($curVar), $value);
+            $formVars[$key] = $val;
+        }
+        $out = $formVars;
     }
-*/
-    $allowed_local_hosts = array(
-        '127.0.0.1',
-        '::1',
-        'localhost'
-    );
-    $referer = (isset($_SERVER['HTTP_REFERER'])) ? $_SERVER['HTTP_REFERER'] : false;
-    $host = (isset($_SERVER['HTTP_HOST'])) ? $_SERVER['HTTP_HOST'] : false;
-    if (false === $host || (false === $referer && (!in_array($host, $allowed_local_hosts)))) die ('CSRF failure!');
-    $formVars = array_merge($_GET, $_POST);
-    foreach ($formVars as $key => $value)
-    {
-        $filter = (is_array($allowed_vars) && array_key_exists($key, $allowed_vars)) ? $allowed_vars[$key] : FILTER_DEFAULT;
-        $out[$key] = clean_var($value, $filter, $options);
-    }
+    else $out = filter_var_array($_REQUEST);
     return $out;
 }
-
-function clean_var($var, $filter = FILTER_SANITIZE_STRING, $options = null)
-{
-    if (!is_array($var)) return filter_var($var, $filter, $options);
-    $out = array();
-    foreach ($var as $key => $value)
-    {
-        $out[$key] = clean_var($value, $filter, $options);
-    }
-    return $out;
-}
-
-
-
-
-
-
